@@ -115,6 +115,7 @@ pub const ManpageStep = struct {
 
 pub fn generate(allocator: std.mem.Allocator, writer: std.io.AnyWriter, reader: std.io.AnyReader) !void {
     var parser = try Parser.init(allocator, writer, reader);
+    errdefer std.log.err("zzdoc error: col={d}, line={d}", .{ parser.col, parser.line });
     try writePreamble(writer);
     try parser.parsePreamble();
     try parser.parseDocument();
