@@ -1,5 +1,8 @@
 const std = @import("std");
 
+const zzdoc = @import("zzdoc.zig");
+pub usingnamespace zzdoc;
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
