@@ -115,6 +115,9 @@ pub const ManpageStep = struct {
 
 pub fn generate(allocator: std.mem.Allocator, writer: std.io.AnyWriter, reader: std.io.AnyReader) !void {
     var parser = try Parser.init(allocator, writer, reader);
+    if (std.posix.getenv("SOURCE_DATE_EPOCH")) |src_date|
+        parser.source_timestamp = try std.fmt.parseInt(i64, src_date, 10);
+
     errdefer std.log.err("zzdoc error: col={d}, line={d}", .{ parser.col, parser.line });
     try writePreamble(writer);
     try parser.parsePreamble();
