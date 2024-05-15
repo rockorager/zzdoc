@@ -23,4 +23,16 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    // Install zzdoc
+    const exe_step = b.step("install-zzdoc", "Install zzdoc as an executable");
+    const exe = b.addExecutable(.{
+        .name = "zzdoc",
+        .root_source_file = b.path("main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_step.dependOn(&exe.step);
+    const install_step = b.addInstallArtifact(exe, .{});
+    exe_step.dependOn(&install_step.step);
 }
