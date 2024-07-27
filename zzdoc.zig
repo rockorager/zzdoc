@@ -97,7 +97,7 @@ pub const ManpageStep = struct {
         const generated_manpages = b.allocator.create(std.Build.GeneratedFile) catch @panic("OOM");
         generated_manpages.* = .{ .step = &self.step };
         self.generated_manpages = generated_manpages;
-        return .{ .generated = generated_manpages };
+        return .{ .generated = .{ .file = generated_manpages } };
     }
 
     pub fn addInstallStep(self: *ManpageStep, options: InstallOptions) *std.Build.Step.InstallDir {
