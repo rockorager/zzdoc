@@ -91,7 +91,7 @@ pub const ManpageStep = struct {
 
     pub fn getEmittedManpages(self: *ManpageStep) std.Build.LazyPath {
         if (self.generated_manpages) |generated| {
-            return .{ .generated = generated };
+            return .{ .generated = .{ .file = generated } };
         }
         const b = self.step.owner;
         const generated_manpages = b.allocator.create(std.Build.GeneratedFile) catch @panic("OOM");
