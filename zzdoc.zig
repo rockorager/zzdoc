@@ -35,10 +35,6 @@ pub const ManpageStep = struct {
     }
 
     pub fn make(step: *std.Build.Step, progress: std.Progress.Node) !void {
-        progress.setUnit("pages");
-        progress.activate();
-        defer progress.end();
-
         const self: *ManpageStep = @fieldParentPtr("step", step);
         const b = step.owner;
 
@@ -55,13 +51,14 @@ pub const ManpageStep = struct {
                 continue;
             count += 1;
         }
-        progress.setEstimatedTotalItems(count);
+        const node = progress.start("generate manpages", count);
+        defer node.end();
 
         dir_iter = src_dir.iterate();
         while (try dir_iter.next()) |entry| {
             if (!std.mem.eql(u8, std.fs.path.extension(entry.name), ".scd"))
                 continue;
-            defer progress.completeOne();
+            defer node.completeOne();
             var src = try src_dir.openFile(entry.name, .{});
             defer src.close();
             // trim '.scd'
