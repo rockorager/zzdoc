@@ -34,7 +34,7 @@ pub const ManpageStep = struct {
         };
     }
 
-    pub fn make(step: *std.Build.Step, progress: *std.Progress.Node) !void {
+    pub fn make(step: *std.Build.Step, progress: std.Progress.Node) !void {
         progress.setName("generating manpages");
         progress.setUnit("pages");
         progress.activate();
