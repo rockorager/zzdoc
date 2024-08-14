@@ -507,6 +507,12 @@ const Parser = struct {
                     last = ch;
                     _ = try self.writer.write("?\\&");
                 },
+                '~' => {
+                    _ = try self.writer.write("\\(ti");
+                },
+                '^' => {
+                    _ = try self.writer.write("\\(ha");
+                },
                 else => {
                     last = ch;
                     try self.writer.writeByte(ch);
@@ -1415,5 +1421,37 @@ test "tables: handles empty table cells" {
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = ".TS\nallbox;l c c.\nT{\n\\fBFoo\\fR\nT}\tT{\n\nT}\tT{\n\nT}\n.TE\n.sp 1\n";
+    try std.testing.expectEqualStrings(expected, writer.items);
+}
+
+test "character-substitute: ~ with \\(ti" {
+    const allocator = std.testing.allocator;
+    var writer = std.ArrayList(u8).init(allocator);
+    defer writer.deinit();
+    const input =
+        \\_hello~_
+        \\
+    ;
+    var stream = std.io.fixedBufferStream(input);
+    var parser = try Parser.init(std.testing.allocator, writer.writer().any(), stream.reader().any());
+    parser.source_timestamp = 0;
+    try parser.parseDocument();
+    const expected = "\\fIhello\\(ti\\fR\n";
+    try std.testing.expectEqualStrings(expected, writer.items);
+}
+
+test "character-substitute: ^ with \\(ha" {
+    const allocator = std.testing.allocator;
+    var writer = std.ArrayList(u8).init(allocator);
+    defer writer.deinit();
+    const input =
+        \\_hello^_
+        \\
+    ;
+    var stream = std.io.fixedBufferStream(input);
+    var parser = try Parser.init(std.testing.allocator, writer.writer().any(), stream.reader().any());
+    parser.source_timestamp = 0;
+    try parser.parseDocument();
+    const expected = "\\fIhello\\(ha\\fR\n";
     try std.testing.expectEqualStrings(expected, writer.items);
 }
