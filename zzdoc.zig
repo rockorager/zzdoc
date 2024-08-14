@@ -600,7 +600,7 @@ const Parser = struct {
                     if (self.getCh() != ' ') return error.ExpectedTwoSpaces;
                     try self.parseText();
                 },
-                '.' => {
+                '.', '-' => {
                     if (self.getCh() != ' ') return error.ExpectedSpace;
                     n = try self.listHeader(list_type, n);
                     try self.parseText();
