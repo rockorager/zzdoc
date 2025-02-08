@@ -34,9 +34,11 @@ pub const ManpageStep = struct {
         };
     }
 
-    pub fn make(step: *std.Build.Step, progress: std.Progress.Node) !void {
+    pub fn make(step: *std.Build.Step, opts: std.Build.Step.MakeOptions) anyerror!void {
         const self: *ManpageStep = @fieldParentPtr("step", step);
         const b = step.owner;
+
+        const progress = opts.progress_node;
 
         var out_dir = try b.cache_root.handle.makeOpenPath("manpages", .{});
         defer out_dir.close();
