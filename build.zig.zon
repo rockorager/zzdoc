@@ -1,5 +1,6 @@
 .{
-    .name = "zzdoc",
+    .name = .zzdoc,
+    .fingerprint = 0x8c26bfd3ef534b7,
     .version = "0.0.0",
     .dependencies = .{},
     .paths = .{

@@ -860,9 +860,8 @@ fn isAlnum(c: u8) bool {
     }
 }
 
-fn testParserFromSlice(input: []const u8) !Parser {
-    var stream = std.io.fixedBufferStream(input);
-    return Parser.init(std.testing.allocator, std.io.null_writer.any(), stream.reader().any());
+fn testParserFromSlice(reader: std.io.AnyReader) !Parser {
+    return Parser.init(std.testing.allocator, std.io.null_writer.any(), reader);
 }
 
 test "preamble: expects a name" {
@@ -901,30 +900,33 @@ test "preamble: expects section to start with a number" {
 }
 
 test "preamble: expects section to be legit" {
-    var parser = try testParserFromSlice("test(100)\n");
-    parser.parsePreamble() catch return;
-    try std.testing.expect(false);
+    var stream = std.io.fixedBufferStream("test(100)\n");
+    var parser = try testParserFromSlice(stream.reader().any());
+    try std.testing.expectError(error.InvalidSection, parser.parsePreamble());
 }
 
 test "preamble: expects section to be legit with subsection" {
-    var parser = try testParserFromSlice("test(100hello)\n");
-    parser.parsePreamble() catch return;
-    try std.testing.expect(false);
+    var stream = std.io.fixedBufferStream("test(100hello)\n");
+    var parser = try testParserFromSlice(stream.reader().any());
+    try std.testing.expectError(error.InvalidSection, parser.parsePreamble());
 }
 
 test "preamble: expects section not to contain a space" {
-    var parser = try testParserFromSlice("test(8 hello)\n");
+    var stream = std.io.fixedBufferStream("test(8 hello)\n");
+    var parser = try testParserFromSlice(stream.reader().any());
     parser.parsePreamble() catch return;
     try std.testing.expect(false);
 }
 
 test "preamble: accepts a valid preamble" {
-    var parser = try testParserFromSlice("test(8)\n");
+    var stream = std.io.fixedBufferStream("test(8)\n");
+    var parser = try testParserFromSlice(stream.reader().any());
     try parser.parsePreamble();
 }
 
 test "preamble: accepts a valid preamble with subsection" {
-    var parser = try testParserFromSlice("test(8hello)\n");
+    var stream = std.io.fixedBufferStream("test(8hello)\n");
+    var parser = try testParserFromSlice(stream.reader().any());
     try parser.parsePreamble();
 }
 
@@ -1414,7 +1416,7 @@ test "tables: handles empty table cells" {
     defer writer.deinit();
     const input =
         \\[[ *Foo*
-        \\:- 
+        \\:-
         \\:-
         \\
     ;
