@@ -37,18 +37,19 @@ pub const ManpageStep = struct {
     pub fn make(step: *std.Build.Step, opts: std.Build.Step.MakeOptions) anyerror!void {
         const self: *ManpageStep = @fieldParentPtr("step", step);
         const b = step.owner;
+        const io = b.graph.io;
 
         const progress = opts.progress_node;
 
-        var out_dir = try b.cache_root.handle.makeOpenPath("manpages", .{});
-        defer out_dir.close();
+        var out_dir = try b.cache_root.handle.createDirPathOpen(io, "manpages", .{});
+        defer out_dir.close(io);
 
-        var src_dir = try std.fs.openDirAbsolute(self.root_doc_dir.getPath(b), .{ .iterate = true });
-        defer src_dir.close();
+        var src_dir = try std.Io.Dir.openDirAbsolute(io, self.root_doc_dir.getPath(b), .{ .iterate = true });
+        defer src_dir.close(io);
 
         var count: usize = 0;
         var dir_iter = src_dir.iterate();
-        while (try dir_iter.next()) |entry| {
+        while (try dir_iter.next(io)) |entry| {
             if (!std.mem.eql(u8, std.fs.path.extension(entry.name), ".scd"))
                 continue;
             count += 1;
@@ -57,29 +58,29 @@ pub const ManpageStep = struct {
         defer node.end();
 
         dir_iter = src_dir.iterate();
-        while (try dir_iter.next()) |entry| {
+        while (try dir_iter.next(io)) |entry| {
             if (!std.mem.eql(u8, std.fs.path.extension(entry.name), ".scd"))
                 continue;
             defer node.completeOne();
-            var src = try src_dir.openFile(entry.name, .{});
+            var src = try src_dir.openFile(io, entry.name, .{});
             var src_buffer: [1024]u8 = undefined;
-            var src_reader = src.reader(&src_buffer);
-            defer src.close();
+            var src_reader = src.reader(io, &src_buffer);
+            defer src.close(io);
             // trim '.scd'
             var dst_name = entry.name[0..(entry.name.len - 4)];
-            const ext_index = std.mem.lastIndexOfScalar(u8, dst_name, '.') orelse return error.NoExtension;
+            const ext_index = std.mem.findScalarLast(u8, dst_name, '.') orelse return error.NoExtension;
             // Extract the man section
             const section = dst_name[ext_index + 1 ..];
 
             const dst_dir_name = try std.fmt.allocPrint(b.allocator, "man{s}", .{section});
-            var dst_dir = try out_dir.makeOpenPath(dst_dir_name, .{});
-            defer dst_dir.close();
-            var dst = try dst_dir.createFile(dst_name, .{});
+            var dst_dir = try out_dir.createDirPathOpen(io, dst_dir_name, .{});
+            defer dst_dir.close(io);
+            var dst = try dst_dir.createFile(io, dst_name, .{});
             var dst_buffer: [1024]u8 = undefined;
-            var dst_writer = dst.writer(&dst_buffer);
-            defer dst.close();
+            var dst_writer = dst.writer(io, &dst_buffer);
+            defer dst.close(io);
 
-            try generate(b.allocator, &dst_writer.interface, &src_reader.interface);
+            try generate(io, b.allocator, b.graph.environ_map, &dst_writer.interface, &src_reader.interface);
         }
 
         if (self.generated_manpages == null) {
@@ -115,12 +116,10 @@ pub const ManpageStep = struct {
     }
 };
 
-pub fn generate(allocator: std.mem.Allocator, writer: *std.Io.Writer, reader: *std.Io.Reader) !void {
-    var parser = try Parser.init(allocator, writer, reader);
+pub fn generate(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ.Map, writer: *std.Io.Writer, reader: *std.Io.Reader) !void {
+    var parser = try Parser.init(io, allocator, writer, reader);
 
-    var env_map = try std.process.getEnvMap(allocator);
-    defer env_map.deinit();
-    if (env_map.get("SOURCE_DATE_EPOCH")) |src_date|
+    if (environ.get("SOURCE_DATE_EPOCH")) |src_date|
         parser.source_timestamp = try std.fmt.parseInt(i64, src_date, 10);
 
     errdefer std.log.err("zzdoc error: col={d}, line={d}", .{ parser.col, parser.line });
@@ -145,6 +144,7 @@ fn writePreamble(writer: *std.Io.Writer) !void {
 
 const Parser = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
 
     source_timestamp: ?i64 = null,
 
@@ -196,9 +196,10 @@ const Parser = struct {
         next: ?*Row = null,
     };
 
-    fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer, reader: *std.Io.Reader) !Parser {
+    fn init(io: std.Io, allocator: std.mem.Allocator, writer: *std.Io.Writer, reader: *std.Io.Reader) !Parser {
         return .{
             .allocator = allocator,
+            .io = io,
             .reader = reader,
             .writer = writer,
         };
@@ -270,7 +271,7 @@ const Parser = struct {
         const date = if (self.source_timestamp) |ts| blk: {
             const days = zeit.daysSinceEpoch(ts);
             break :blk zeit.civilFromDays(days);
-        } else zeit.now();
+        } else zeit.now(self.io);
 
         while (self.getCh()) |ch| {
             switch (ch) {
@@ -866,13 +867,13 @@ fn isAlnum(c: u8) bool {
 
 fn testParserFromSlice(reader: *std.Io.Reader) !Parser {
     var discarding = std.Io.Writer.Discarding.init(&.{});
-    return Parser.init(std.testing.allocator, &discarding.writer, reader);
+    return Parser.init(std.testing.io, std.testing.allocator, &discarding.writer, reader);
 }
 
 test "preamble: expects a name" {
     var fixed = std.Io.Reader.fixed("(8)\n");
     var discarding = std.Io.Writer.Discarding.init(&.{});
-    var parser = try Parser.init(std.testing.allocator, &discarding.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &discarding.writer, &fixed);
     parser.parsePreamble() catch return;
     try std.testing.expect(false);
 }
@@ -880,7 +881,7 @@ test "preamble: expects a name" {
 test "preamble: expects a section" {
     var fixed = std.Io.Reader.fixed("test\n");
     var discarding = std.Io.Writer.Discarding.init(&.{});
-    var parser = try Parser.init(std.testing.allocator, &discarding.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &discarding.writer, &fixed);
     parser.parsePreamble() catch return;
     try std.testing.expect(false);
 }
@@ -888,7 +889,7 @@ test "preamble: expects a section" {
 test "preamble: expects a section within the parentheses" {
     var fixed = std.Io.Reader.fixed("test()\n");
     var discarding = std.Io.Writer.Discarding.init(&.{});
-    var parser = try Parser.init(std.testing.allocator, &discarding.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &discarding.writer, &fixed);
     parser.parsePreamble() catch return;
     try std.testing.expect(false);
 }
@@ -896,7 +897,7 @@ test "preamble: expects a section within the parentheses" {
 test "preamble: expects name to alphanumeric" {
     var fixed = std.Io.Reader.fixed("!!!!(8)\n");
     var discarding = std.Io.Writer.Discarding.init(&.{});
-    var parser = try Parser.init(std.testing.allocator, &discarding.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &discarding.writer, &fixed);
     parser.parsePreamble() catch return;
     try std.testing.expect(false);
 }
@@ -904,7 +905,7 @@ test "preamble: expects name to alphanumeric" {
 test "preamble: expects section to start with a number" {
     var fixed = std.Io.Reader.fixed("test(hello)\n");
     var discarding = std.Io.Writer.Discarding.init(&.{});
-    var parser = try Parser.init(std.testing.allocator, &discarding.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &discarding.writer, &fixed);
     parser.parsePreamble() catch return;
     try std.testing.expect(false);
 }
@@ -945,7 +946,7 @@ test "preamble: writes the appropriate header" {
     var allocating = std.Io.Writer.Allocating.init(allocator);
     defer allocating.deinit();
     var fixed = std.Io.Reader.fixed("test(8)\n");
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     const expected =
@@ -960,7 +961,7 @@ test "preamble: preserves dashes" {
     var allocating = std.Io.Writer.Allocating.init(allocator);
     defer allocating.deinit();
     var fixed = std.Io.Reader.fixed("test-manual(8)\n");
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     const expected =
@@ -979,7 +980,7 @@ test "preamble: handles extra footer field" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     const expected =
@@ -998,7 +999,7 @@ test "preamble: handles both extra footer fields" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     const expected =
@@ -1017,7 +1018,7 @@ test "preamble: emits empty footer correctly" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     const expected =
@@ -1033,7 +1034,7 @@ test "indent: indents indented text" {
     defer allocating.deinit();
     const input = "Not indented\n\tIndented one level\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected =
@@ -1052,7 +1053,7 @@ test "indent: deindents following indented text" {
     defer allocating.deinit();
     const input = "Not indented\n\tIndented one level\nNot indented\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected =
@@ -1072,7 +1073,7 @@ test "indent: disallows multi-step indents" {
     defer allocating.deinit();
     const input = "Not indented\n\tIndented one level\n\t\t\tIndented three levels\nNot indented\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     parser.parseDocument() catch return;
     try std.testing.expect(false);
@@ -1085,7 +1086,7 @@ test "indent: allows indentation changes > 1 in literal blocks" {
     const input = "This is some code:\n\n```\nfoobar:\n\n\t\t# asdf\n```\n";
 
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "This is some code:\n.PP\n.nf\n.RS 4\nfoobar:\n\n\t\t# asdf\n.fi\n.RE\n";
@@ -1098,7 +1099,7 @@ test "indent: allows multi-sept dedents" {
     defer allocating.deinit();
     const input = "Not indented\n\tIndented one level\n\t\tIndented two levels\nNot indented\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected =
@@ -1121,7 +1122,7 @@ test "indent: allows indented literal blocks" {
     defer allocating.deinit();
     const input = "\t```\n\tIndented\n\t```\nNot indented\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = ".RS 4\n.nf\n.RS 4\nIndented\n.fi\n.RE\n.RE\nNot indented\n";
@@ -1134,7 +1135,7 @@ test "indent: disallows dedenting in literal blocks" {
     defer allocating.deinit();
     const input = "\t\t```\n\t\tIndented\n\tDedented\n\t\t```\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     parser.parseDocument() catch return;
     try std.testing.expect(false);
@@ -1153,7 +1154,7 @@ test "comments: ignore comments" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     try parser.parseDocument();
@@ -1180,7 +1181,7 @@ test "Fail on invalid comments" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     parser.parseDocument() catch return;
@@ -1198,7 +1199,7 @@ test "heading: fail on ###" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     parser.parseDocument() catch return;
@@ -1216,7 +1217,7 @@ test "heading: expects a space after #" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parsePreamble();
     parser.parseDocument() catch return;
@@ -1232,7 +1233,7 @@ test "heading: emits a new sections" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     try parser.parseDocument();
     const expected =
         \\.SH HEADER
@@ -1250,7 +1251,7 @@ test "heading: emits a new subsection" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     try parser.parseDocument();
     const expected =
         \\.SS HEADER
@@ -1265,7 +1266,7 @@ test "formatting: disallows nested formatting" {
     defer allocating.deinit();
     const input = "_hello *world*_";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     parser.parseDocument() catch return;
     try std.testing.expect(false);
@@ -1277,7 +1278,7 @@ test "formatting: ignores underscores in words" {
     defer allocating.deinit();
     const input = "hello_world";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected =
@@ -1292,7 +1293,7 @@ test "formatting: ignores underscores in underlined words" {
     defer allocating.deinit();
     const input = "_hello_world_\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "\\fIhello_world\\fR\n";
@@ -1305,7 +1306,7 @@ test "formatting: ignores underscores in bold words" {
     defer allocating.deinit();
     const input = "*hello_world*\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "\\fBhello_world\\fR\n";
@@ -1318,7 +1319,7 @@ test "formatting: emits bold text" {
     defer allocating.deinit();
     const input = "hello \\_world\\_\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "hello _world_\n";
@@ -1331,7 +1332,7 @@ test "line-breaks: handles line break" {
     defer allocating.deinit();
     const input = "hello++\nworld\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "hello\n.br\nworld\n";
@@ -1344,7 +1345,7 @@ test "line-breaks: disallows empty line after line break" {
     defer allocating.deinit();
     const input = "hello++\n\nworld\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     parser.parseDocument() catch return;
     try std.testing.expect(false);
@@ -1356,7 +1357,7 @@ test "line-breaks: leave single +" {
     defer allocating.deinit();
     const input = "hello+world\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "hello+world\n";
@@ -1369,7 +1370,7 @@ test "line-breaks: leave double + without newline" {
     defer allocating.deinit();
     const input = "hello++world\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "hello++world\n";
@@ -1382,7 +1383,7 @@ test "line-breaks: handles underlined text following line break" {
     defer allocating.deinit();
     const input = "hello++\n_world_\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "hello\n.br\n\\fIworld\\fR\n";
@@ -1395,7 +1396,7 @@ test "line-breaks: suppresses sentence spacing" {
     defer allocating.deinit();
     const input = "hel!lo.\nworld.\n";
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "hel!\\&lo.\\&\nworld.\\&\n";
@@ -1413,7 +1414,7 @@ test "tables: handles cells" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = ".TS\nallbox;l c c.\nT{\n\\fBFoo\\fR\nT}\tT{\nbar\nT}\tT{\nbaz\nT}\n.TE\n.sp 1\n";
@@ -1431,7 +1432,7 @@ test "tables: handles empty table cells" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = ".TS\nallbox;l c c.\nT{\n\\fBFoo\\fR\nT}\tT{\n\nT}\tT{\n\nT}\n.TE\n.sp 1\n";
@@ -1447,7 +1448,7 @@ test "character-substitute: ~ with \\(ti" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "\\fIhello\\(ti\\fR\n";
@@ -1463,7 +1464,7 @@ test "character-substitute: ^ with \\(ha" {
         \\
     ;
     var fixed = std.Io.Reader.fixed(input);
-    var parser = try Parser.init(std.testing.allocator, &allocating.writer, &fixed);
+    var parser = try Parser.init(std.testing.io, std.testing.allocator, &allocating.writer, &fixed);
     parser.source_timestamp = 0;
     try parser.parseDocument();
     const expected = "\\fIhello\\(ha\\fR\n";

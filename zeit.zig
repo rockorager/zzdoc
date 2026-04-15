@@ -5,8 +5,8 @@ const assert = std.debug.assert;
 const s_per_day = std.time.s_per_day;
 const days_per_era = 365 * 400 + 97;
 
-pub fn now() Date {
-    const ts = std.time.timestamp();
+pub fn now(io: std.Io) Date {
+    const ts = std.Io.Timestamp.now(io, .real).toSeconds();
     const days = daysSinceEpoch(ts);
     return civilFromDays(days);
 }
