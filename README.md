@@ -15,18 +15,22 @@ inputs and outputs.
 const std = @import("std");
 const zzdoc = @import("zzdoc");
 
-pub fn main() !void {
-    const allocator = std.testing.allocator;
-    var src = std.fs.cwd().openFile("zzdoc.5.scd", .{});
-    var src_buffer: [1024]u8 = undefined;
-    var src_reader = src.reader(&src_buffer);
-    defer src.close();
-    var dst = std.fs.cwd().createFile("zzdoc.5", .{});
-    var dst_buffer: [1024]u8 = undefined;
-    var dst_writer = dst.writer(&dst_buffer);
-    defer dst.close();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+    var environ = try init.environ_map.clone(allocator);
+    defer environ.deinit();
 
-    try zzdoc.generate(allocator, &dst_writer.interface, &src_reader.interface);
+    var src = try std.Io.Dir.cwd().openFile(io, "zzdoc.5.scd", .{});
+    var src_buffer: [1024]u8 = undefined;
+    var src_reader = src.reader(io, &src_buffer);
+    defer src.close(io);
+    var dst = try std.Io.Dir.cwd().createFile(io, "zzdoc.5", .{});
+    var dst_buffer: [1024]u8 = undefined;
+    var dst_writer = dst.writer(io, &dst_buffer);
+    defer dst.close(io);
+
+    try zzdoc.generate(io, allocator, environ, &dst_writer.interface, &src_reader.interface);
 }
 ```
 
