@@ -80,7 +80,7 @@ pub const ManpageStep = struct {
             var dst_writer = dst.writer(io, &dst_buffer);
             defer dst.close(io);
 
-            try generate(io, b.allocator, b.graph.environ_map, &dst_writer.interface, &src_reader.interface);
+            try generate(io, b.allocator, &b.graph.environ_map, &dst_writer.interface, &src_reader.interface);
         }
 
         if (self.generated_manpages == null) {
@@ -116,7 +116,7 @@ pub const ManpageStep = struct {
     }
 };
 
-pub fn generate(io: std.Io, allocator: std.mem.Allocator, environ: std.process.Environ.Map, writer: *std.Io.Writer, reader: *std.Io.Reader) !void {
+pub fn generate(io: std.Io, allocator: std.mem.Allocator, environ: *const std.process.Environ.Map, writer: *std.Io.Writer, reader: *std.Io.Reader) !void {
     var parser = try Parser.init(io, allocator, writer, reader);
 
     if (environ.get("SOURCE_DATE_EPOCH")) |src_date|
