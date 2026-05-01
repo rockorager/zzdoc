@@ -4,8 +4,7 @@ const zzdoc = @import("zzdoc.zig");
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
-    var environ = try init.environ_map.clone(gpa);
-    defer environ.deinit();
+    const environ = init.environ_map;
 
     var stdin_buffer: [1024]u8 = undefined;
     var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buffer);
