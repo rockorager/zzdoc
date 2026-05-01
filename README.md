@@ -18,8 +18,7 @@ const zzdoc = @import("zzdoc");
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     const io = init.io;
-    var environ = try init.environ_map.clone(allocator);
-    defer environ.deinit();
+    const environ = init.environ_map;
 
     var src = try std.Io.Dir.cwd().openFile(io, "zzdoc.5.scd", .{});
     var src_buffer: [1024]u8 = undefined;
