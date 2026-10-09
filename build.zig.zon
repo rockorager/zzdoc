@@ -9,5 +9,6 @@
         "build.zig.zon",
         "zeit.zig",
         "zzdoc.zig",
+        "build_manpage_helper.zig",
     },
 }

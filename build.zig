@@ -1,11 +1,53 @@
 const std = @import("std");
 
-const zzdoc = @import("zzdoc.zig");
-pub const addManpageStep = zzdoc.addManpageStep;
-pub const generate = zzdoc.generate;
-pub const ManpageOptions = zzdoc.ManpageOptions;
-pub const InstallOptions = zzdoc.InstallOptions;
-pub const ManpageStep = zzdoc.ManpageStep;
+const LazyPath = std.Build.LazyPath;
+const Step = std.Build.Step;
+
+pub const ManpageOptions = struct {
+    root_doc_dir: LazyPath,
+};
+
+pub const InstallOptions = struct {
+    install_subdir: []const u8 = "share/man",
+};
+
+pub const ManpageHelper = struct {
+    helper_exe: *Step.Compile,
+    output_dir: ?LazyPath = null,
+
+    const Self = @This();
+
+    pub fn init(b: *std.Build, zzdoc_dep: *std.Build.Dependency) Self {
+        const h = b.addExecutable(.{
+            .name = "zzdoc_man_helper",
+            .root_module = b.createModule(.{
+                .root_source_file = zzdoc_dep.path("build_manpage_helper.zig"),
+                .target = b.graph.host,
+                .optimize = .safe,
+            }),
+        });
+        return .{ .helper_exe = h };
+    }
+
+    pub fn addManpageStep(self: *Self, b: *std.Build, options: ManpageOptions) *Step.Run {
+        const result = b.addRunArtifact(self.helper_exe);
+        result.addDirectoryArg2(options.root_doc_dir, .{});
+        self.output_dir = result.addOutputDirectoryArg2("manpages", .{});
+        return result;
+    }
+
+    pub fn addInstallStep(self: *const Self, b: *std.Build, options: InstallOptions) *Step.InstallDir {
+        const source_dir = self.output_dir orelse {
+            std.log.err("missing output dir when calling addInstallStep, don't forget to call addManpageStep first", .{});
+            std.process.exit(1);
+        };
+        return b.addInstallDirectory(.{
+            .source_dir = source_dir,
+            .install_dir = .prefix,
+            .install_subdir = options.install_subdir,
+        });
+    }
+};
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
