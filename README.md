@@ -42,19 +42,22 @@ const std = @import("std");
 const zzdoc = @import("zzdoc");
 
 pub fn build(b: *std.Build) void {
-    // Render docs/foo.1.scd and docs/foo.5.scd and install them to
-    // `<prefix>/share/man/man1/foo.1` and `<prefix>/share/man/man5/foo.5`
-    // as part of `zig build install`.
+    // Render every *.scd file in docs/ and install it as part of
+    // `zig build install`, e.g. docs/foo.1.scd to
+    // `<prefix>/share/man/man1/foo.1`.
     zzdoc.installManpages(b, .{
         .root_doc_dir = b.path("docs/"),
-        .files = &.{ "foo.1.scd", "foo.5.scd" },
     });
 }
 ```
 
-Each page is rendered by its own build step, so editing one source file only
-regenerates that page. For more control, `zzdoc.addManpage(b, source, "foo.1")`
-returns the generated page as a `LazyPath` without installing it.
+Manpages are regenerated on every build. For more control,
+`zzdoc.addManpages(b, b.path("docs/"))` returns the generated `man<section>/`
+tree as a `LazyPath` without installing it.
+
+The `zzdoc` executable works like `scdoc`, reading from stdin and writing to
+stdout. `zzdoc <input-dir> <output-dir>` renders a whole directory the same way
+the build helpers do.
 
 ## License
 
