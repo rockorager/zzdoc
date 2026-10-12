@@ -34,27 +34,30 @@ pub fn main(init: std.process.Init) !void {
 ```
 
 `zzdoc` also exposes `build.zig` helpers to make installation of manpages as
-smooth as possible.
+smooth as possible. Add `zzdoc` to your `build.zig.zon` with `zig fetch --save`,
+then:
 
 ```zig
 const std = @import("std");
 const zzdoc = @import("zzdoc");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    // All of our *.scd files live in ./docs/
-    var man_step = zzdoc.addManpageStep(b, .{
+    // Render every *.scd file in docs/ and install it as part of
+    // `zig build install`, e.g. docs/foo.1.scd to
+    // `<prefix>/share/man/man1/foo.1`.
+    zzdoc.installManpages(b, .{
         .root_doc_dir = b.path("docs/"),
     });
-
-    // Add an install step. This helper will install manpages to their
-    // appropriate subdirectory under `.prefix/share/man`
-    const install_step = man_step.addInstallStep(.{});
-    b.default_step.dependOn(&install_step.step);
 }
 ```
+
+Manpages are regenerated on every build. For more control,
+`zzdoc.addManpages(b, b.path("docs/"))` returns the generated `man<section>/`
+tree as a `LazyPath` without installing it.
+
+The `zzdoc` executable works like `scdoc`, reading from stdin and writing to
+stdout. `zzdoc <input-dir> <output-dir>` renders a whole directory the same way
+the build helpers do.
 
 ## License
 

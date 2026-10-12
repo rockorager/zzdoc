@@ -1,11 +1,36 @@
 const std = @import("std");
 
-const zzdoc = @import("zzdoc.zig");
-pub const addManpageStep = zzdoc.addManpageStep;
-pub const generate = zzdoc.generate;
-pub const ManpageOptions = zzdoc.ManpageOptions;
-pub const InstallOptions = zzdoc.InstallOptions;
-pub const ManpageStep = zzdoc.ManpageStep;
+const LazyPath = std.Build.LazyPath;
+
+/// Renders every `*.scd` file in `root_doc_dir` with the zzdoc executable.
+/// The returned directory holds each page at `man<section>/<name>`, for
+/// example `man1/foo.1` for `foo.1.scd`.
+pub fn addManpages(b: *std.Build, root_doc_dir: LazyPath) LazyPath {
+    const zzdoc = b.dependencyFromBuildZig(@This(), .{ .optimize = .safe }).artifact("zzdoc");
+    const run = b.addRunArtifact(zzdoc);
+    // The build system caches directory arguments by path, not contents, so
+    // regenerate every build. Rendering takes milliseconds.
+    run.has_side_effects = true;
+    run.addDirectoryArg2(root_doc_dir, .{});
+    return run.addOutputDirectoryArg2("manpages", .{});
+}
+
+pub const ManpageOptions = struct {
+    /// Directory containing the scdoc sources, named like `foo.1.scd`.
+    root_doc_dir: LazyPath,
+    install_subdir: []const u8 = "share/man",
+};
+
+/// Renders every `*.scd` file in `options.root_doc_dir` and installs the
+/// pages to `<prefix>/<install_subdir>/man<section>/` as part of the install
+/// step.
+pub fn installManpages(b: *std.Build, options: ManpageOptions) void {
+    b.installDirectory(.{
+        .source_dir = addManpages(b, options.root_doc_dir),
+        .install_dir = .prefix,
+        .install_subdir = options.install_subdir,
+    });
+}
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -37,7 +62,8 @@ pub fn build(b: *std.Build) void {
         .name = "zzdoc",
         .root_module = exe_module,
     });
-    exe_step.dependOn(&exe.step);
-    const install_step = b.addInstallArtifact(exe, .{});
-    exe_step.dependOn(&install_step.step);
+    // Part of the default install step so dependents can use
+    // `artifact("zzdoc")`, which addManpages relies on.
+    b.installArtifact(exe);
+    exe_step.dependOn(b.getInstallStep());
 }
