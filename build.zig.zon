@@ -5,10 +5,10 @@
     .dependencies = .{},
     .paths = .{
         "LICENSE",
+        "main.zig",
         "build.zig",
         "build.zig.zon",
         "zeit.zig",
         "zzdoc.zig",
-        "build_manpage_helper.zig",
     },
 }

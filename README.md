@@ -34,27 +34,27 @@ pub fn main(init: std.process.Init) !void {
 ```
 
 `zzdoc` also exposes `build.zig` helpers to make installation of manpages as
-smooth as possible.
+smooth as possible. Add `zzdoc` to your `build.zig.zon` with `zig fetch --save`,
+then:
 
 ```zig
 const std = @import("std");
 const zzdoc = @import("zzdoc");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    // All of our *.scd files live in ./docs/
-    var man_step = zzdoc.addManpageStep(b, .{
+    // Render docs/foo.1.scd and docs/foo.5.scd and install them to
+    // `<prefix>/share/man/man1/foo.1` and `<prefix>/share/man/man5/foo.5`
+    // as part of `zig build install`.
+    zzdoc.installManpages(b, .{
         .root_doc_dir = b.path("docs/"),
+        .files = &.{ "foo.1.scd", "foo.5.scd" },
     });
-
-    // Add an install step. This helper will install manpages to their
-    // appropriate subdirectory under `.prefix/share/man`
-    const install_step = man_step.addInstallStep(.{});
-    b.default_step.dependOn(&install_step.step);
 }
 ```
+
+Each page is rendered by its own build step, so editing one source file only
+regenerates that page. For more control, `zzdoc.addManpage(b, source, "foo.1")`
+returns the generated page as a `LazyPath` without installing it.
 
 ## License
 

@@ -1,53 +1,41 @@
 const std = @import("std");
 
 const LazyPath = std.Build.LazyPath;
-const Step = std.Build.Step;
+
+/// Renders the scdoc file `source` into a roff manpage named `basename`
+/// using the zzdoc executable.
+pub fn addManpage(b: *std.Build, source: LazyPath, basename: []const u8) LazyPath {
+    const zzdoc = b.dependencyFromBuildZig(@This(), .{ .optimize = .safe }).artifact("zzdoc");
+    const run = b.addRunArtifact(zzdoc);
+    run.setStdIn(.{ .lazy_path = source });
+    return run.captureStdOut(.{ .basename = basename });
+}
 
 pub const ManpageOptions = struct {
+    /// Directory containing the scdoc sources.
     root_doc_dir: LazyPath,
-};
-
-pub const InstallOptions = struct {
+    /// Source file names in `root_doc_dir`, such as "foo.1.scd". The man
+    /// section is taken from the name.
+    files: []const []const u8,
     install_subdir: []const u8 = "share/man",
 };
 
-pub const ManpageHelper = struct {
-    helper_exe: *Step.Compile,
-    output_dir: ?LazyPath = null,
+/// Renders each of `options.files` and installs it to
+/// `<prefix>/<install_subdir>/man<section>/` as part of the install step.
+pub fn installManpages(b: *std.Build, options: ManpageOptions) void {
+    for (options.files) |file| {
+        if (!std.mem.endsWith(u8, file, ".scd"))
+            std.debug.panic("zzdoc: '{s}' does not end in .scd", .{file});
+        const name = file[0 .. file.len - ".scd".len];
+        const section = std.fs.path.extension(name);
+        if (section.len < 2)
+            std.debug.panic("zzdoc: '{s}' has no man section, expected a name like foo.1.scd", .{file});
 
-    const Self = @This();
-
-    pub fn init(b: *std.Build, zzdoc_dep: *std.Build.Dependency) Self {
-        const h = b.addExecutable(.{
-            .name = "zzdoc_man_helper",
-            .root_module = b.createModule(.{
-                .root_source_file = zzdoc_dep.path("build_manpage_helper.zig"),
-                .target = b.graph.host,
-                .optimize = .safe,
-            }),
-        });
-        return .{ .helper_exe = h };
+        const page = addManpage(b, options.root_doc_dir.path(b, file), name);
+        const dest = b.fmt("{s}/man{s}/{s}", .{ options.install_subdir, section[1..], name });
+        b.getInstallStep().dependOn(&b.addInstallFileWithDir(page, .prefix, dest).step);
     }
-
-    pub fn addManpageStep(self: *Self, b: *std.Build, options: ManpageOptions) *Step.Run {
-        const result = b.addRunArtifact(self.helper_exe);
-        result.addDirectoryArg2(options.root_doc_dir, .{});
-        self.output_dir = result.addOutputDirectoryArg2("manpages", .{});
-        return result;
-    }
-
-    pub fn addInstallStep(self: *const Self, b: *std.Build, options: InstallOptions) *Step.InstallDir {
-        const source_dir = self.output_dir orelse {
-            std.log.err("missing output dir when calling addInstallStep, don't forget to call addManpageStep first", .{});
-            std.process.exit(1);
-        };
-        return b.addInstallDirectory(.{
-            .source_dir = source_dir,
-            .install_dir = .prefix,
-            .install_subdir = options.install_subdir,
-        });
-    }
-};
+}
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -79,7 +67,8 @@ pub fn build(b: *std.Build) void {
         .name = "zzdoc",
         .root_module = exe_module,
     });
-    exe_step.dependOn(&exe.step);
-    const install_step = b.addInstallArtifact(exe, .{});
-    exe_step.dependOn(&install_step.step);
+    // Part of the default install step so dependents can use
+    // `artifact("zzdoc")`, which addManpage relies on.
+    b.installArtifact(exe);
+    exe_step.dependOn(b.getInstallStep());
 }
